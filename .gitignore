@@ -1,0 +1,6 @@
+# Local Wi-Fi credentials.
+firmware/esp32-ld2450/config.h
+
+# Arduino CLI output when using the documented local build directory.
+firmware/esp32-ld2450/build/
+
