@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,7 +91,17 @@ func nodeFromEntry(entry *zeroconf.ServiceEntry) (Node, error) {
 	if ip == nil {
 		return Node{}, errors.New("missing IPv4 address")
 	}
-	return newNode(values["id"], name, capabilities, ip, entry.Port), nil
+	node := newNode(values["id"], name, capabilities, ip, entry.Port)
+	if rawMax, ok := values["target_count_max"]; ok {
+		maxTargets, err := strconv.Atoi(rawMax)
+		if err != nil || maxTargets < 1 {
+			return Node{}, fmt.Errorf("invalid target_count_max %q", rawMax)
+		}
+		if err := node.setCapabilityMetadata(CapabilityTargetCount, TargetCountCapability{Max: maxTargets}); err != nil {
+			return Node{}, fmt.Errorf("invalid target_count_max: %w", err)
+		}
+	}
+	return node, nil
 }
 
 func parseCapabilities(value string) []Capability {

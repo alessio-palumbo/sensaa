@@ -1,6 +1,7 @@
 package sensaa
 
 import (
+	"fmt"
 	"net"
 	"slices"
 	"time"
@@ -17,12 +18,29 @@ const (
 	CapabilityTargetVelocity   Capability = "target_velocity"
 )
 
+// CapabilityMetadata is optional static information describing a capability.
+// Implementations are defined by this package so callers use typed accessors
+// instead of handling untyped metadata.
+type CapabilityMetadata interface {
+	capabilityMetadata()
+}
+
+// TargetCountCapability describes the limits of a node's target-count
+// capability. Max is the maximum number of simultaneous targets the node
+// claims it can report.
+type TargetCountCapability struct {
+	Max int `json:"max"`
+}
+
+func (TargetCountCapability) capabilityMetadata() {}
+
 // Node is a discovered Sensaa sensor node.
 type Node struct {
-	id           string
-	name         string
-	capabilities []Capability
-	address      string
+	id                 string
+	name               string
+	capabilities       []Capability
+	capabilityMetadata map[Capability]CapabilityMetadata
+	address            string
 }
 
 func (n Node) ID() string { return n.id }
@@ -34,6 +52,17 @@ func (n Node) Capabilities() []Capability { return slices.Clone(n.capabilities) 
 
 func (n Node) HasCapability(want Capability) bool {
 	return slices.Contains(n.capabilities, want)
+}
+
+// TargetCountCapability returns target-count metadata when the node advertises
+// it. The boolean is false for nodes without this capability metadata.
+func (n Node) TargetCountCapability() (TargetCountCapability, bool) {
+	metadata, ok := n.capabilityMetadata[CapabilityTargetCount]
+	if !ok {
+		return TargetCountCapability{}, false
+	}
+	targetCount, ok := metadata.(TargetCountCapability)
+	return targetCount, ok
 }
 
 // PositionMM is a two-dimensional position in millimetres relative to a node.
@@ -61,9 +90,21 @@ func (u Update) TargetCount() int { return len(u.Targets) }
 
 func newNode(id, name string, capabilities []Capability, ip net.IP, port int) Node {
 	return Node{
-		id:           id,
-		name:         name,
-		capabilities: slices.Clone(capabilities),
-		address:      net.JoinHostPort(ip.String(), itoa(port)),
+		id:                 id,
+		name:               name,
+		capabilities:       slices.Clone(capabilities),
+		capabilityMetadata: make(map[Capability]CapabilityMetadata),
+		address:            net.JoinHostPort(ip.String(), itoa(port)),
 	}
+}
+
+func (n *Node) setCapabilityMetadata(capability Capability, metadata CapabilityMetadata) error {
+	if !n.HasCapability(capability) {
+		return fmt.Errorf("metadata advertised without capability %q", capability)
+	}
+	if n.capabilityMetadata == nil {
+		n.capabilityMetadata = make(map[Capability]CapabilityMetadata)
+	}
+	n.capabilityMetadata[capability] = metadata
+	return nil
 }

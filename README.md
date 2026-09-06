@@ -21,6 +21,9 @@ if err != nil {
 }
 for _, node := range nodes {
     fmt.Printf("%s: %v\n", node.Name(), node.Capabilities())
+    if targetCount, ok := node.TargetCountCapability(); ok {
+        fmt.Printf("tracks up to %d targets\n", targetCount.Max)
+    }
 }
 
 client, err := nodes[0].Connect(ctx)
@@ -130,12 +133,19 @@ first discovered node. Select one by its advertised name or ID with `--sensor`.
 
 ## Minimal protocol v1
 
-DNS-SD TXT records contain `ver`, `id`, `name`, and comma-separated `caps`.
-After a TCP connection the node sends one `hello` JSON line, followed by
-`update` lines. Each update is a complete snapshot containing presence, target
-count, and zero or more targets with millimetre positions, cm/s velocity, and
-millimetre resolution. Protocol JSON is intentionally private to the Go
-package; callers consume typed values.
+DNS-SD TXT records contain `ver`, `id`, `name`, comma-separated `caps`, and
+capability-scoped metadata such as `target_count_max`. After a TCP connection
+the node sends one `hello` JSON line—including the same capability metadata—
+followed by `update` lines. Each update is a complete snapshot containing
+presence, target count, and zero or more targets with millimetre positions,
+cm/s velocity, and millimetre resolution. Protocol JSON is intentionally
+private to the Go package; callers consume typed values.
+
+The metadata returned by `Node` is the discovery snapshot. On connection,
+metadata present in both discovery and the greeting must agree. A greeting
+without metadata remains compatible with nodes from before metadata was added;
+it does not remove metadata already learned during discovery. Unknown future
+metadata is ignored until that Sensaa library version has a typed API for it.
 
 This is local-LAN prototype transport with no authentication or encryption.
 mDNS generally stays within one multicast/broadcast domain, so guest Wi-Fi,

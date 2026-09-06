@@ -3,6 +3,7 @@ package sensaa
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -10,16 +11,17 @@ import (
 const protocolVersion = 1
 
 type wireMessage struct {
-	Type         string       `json:"type"`
-	Version      int          `json:"version,omitempty"`
-	ID           string       `json:"id,omitempty"`
-	Name         string       `json:"name,omitempty"`
-	Capabilities []Capability `json:"capabilities,omitempty"`
-	Sequence     uint64       `json:"sequence,omitempty"`
-	UptimeMS     uint64       `json:"uptime_ms,omitempty"`
-	Presence     bool         `json:"presence"`
-	TargetCount  int          `json:"target_count,omitempty"`
-	Targets      []wireTarget `json:"targets,omitempty"`
+	Type               string                         `json:"type"`
+	Version            int                            `json:"version,omitempty"`
+	ID                 string                         `json:"id,omitempty"`
+	Name               string                         `json:"name,omitempty"`
+	Capabilities       []Capability                   `json:"capabilities,omitempty"`
+	CapabilityMetadata map[Capability]json.RawMessage `json:"capability_metadata,omitempty"`
+	Sequence           uint64                         `json:"sequence,omitempty"`
+	UptimeMS           uint64                         `json:"uptime_ms,omitempty"`
+	Presence           bool                           `json:"presence"`
+	TargetCount        int                            `json:"target_count,omitempty"`
+	Targets            []wireTarget                   `json:"targets,omitempty"`
 }
 
 type wireTarget struct {
@@ -35,6 +37,30 @@ func decodeWireMessage(line []byte) (wireMessage, error) {
 		return wireMessage{}, fmt.Errorf("decode Sensaa message: %w", err)
 	}
 	return message, nil
+}
+
+func capabilityMetadataFromWire(message wireMessage) (map[Capability]CapabilityMetadata, error) {
+	metadata := make(map[Capability]CapabilityMetadata)
+	for capability, raw := range message.CapabilityMetadata {
+		switch capability {
+		case CapabilityTargetCount:
+			if !slices.Contains(message.Capabilities, capability) {
+				return nil, fmt.Errorf("metadata provided without capability %q", capability)
+			}
+			var targetCount TargetCountCapability
+			if err := json.Unmarshal(raw, &targetCount); err != nil {
+				return nil, fmt.Errorf("decode %s capability metadata: %w", capability, err)
+			}
+			if targetCount.Max < 1 {
+				return nil, fmt.Errorf("invalid %s capability maximum %d", capability, targetCount.Max)
+			}
+			metadata[capability] = targetCount
+		default:
+			// Preserve forward compatibility: retain the advertised capability
+			// name, but ignore metadata this library version cannot type safely.
+		}
+	}
+	return metadata, nil
 }
 
 func updateFromWire(message wireMessage) (Update, error) {

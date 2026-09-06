@@ -12,10 +12,14 @@ import (
 
 func TestConnectAndRead(t *testing.T) {
 	node, stop := serveTestStream(t,
-		`{"type":"hello","version":1,"id":"node-1","name":"Test","capabilities":["presence"]}`+"\n"+
+		`{"type":"hello","version":1,"id":"node-1","name":"Test","capabilities":["presence","target_count"],"capability_metadata":{"target_count":{"max":3}}}`+"\n"+
 			`{"type":"update","sequence":7,"uptime_ms":1250,"presence":true,"target_count":1,"targets":[{"x_mm":-300,"y_mm":400,"velocity_cm_s":-8,"resolution_mm":360}]}`+"\n",
 	)
 	defer stop()
+	node.capabilities = []Capability{CapabilityPresence, CapabilityTargetCount}
+	node.capabilityMetadata = map[Capability]CapabilityMetadata{
+		CapabilityTargetCount: TargetCountCapability{Max: 3},
+	}
 
 	client, err := node.Connect(context.Background())
 	if err != nil {
@@ -47,6 +51,35 @@ func TestConnectRejectsWrongIdentity(t *testing.T) {
 	if err == nil {
 		t.Fatal("Connect accepted a different node identity")
 	}
+}
+
+func TestConnectValidatesTargetCountMetadata(t *testing.T) {
+	node, stop := serveTestStream(t, `{"type":"hello","version":1,"id":"node-1","capabilities":["target_count"],"capability_metadata":{"target_count":{"max":2}}}`+"\n")
+	defer stop()
+	node.capabilities = []Capability{CapabilityTargetCount}
+	node.capabilityMetadata = map[Capability]CapabilityMetadata{
+		CapabilityTargetCount: TargetCountCapability{Max: 3},
+	}
+
+	_, err := node.Connect(context.Background())
+	if err == nil {
+		t.Fatal("Connect accepted target-count metadata that differed from discovery")
+	}
+}
+
+func TestConnectAcceptsMissingGreetingMetadata(t *testing.T) {
+	node, stop := serveTestStream(t, `{"type":"hello","version":1,"id":"node-1","capabilities":["target_count"]}`+"\n")
+	defer stop()
+	node.capabilities = []Capability{CapabilityTargetCount}
+	node.capabilityMetadata = map[Capability]CapabilityMetadata{
+		CapabilityTargetCount: TargetCountCapability{Max: 3},
+	}
+
+	client, err := node.Connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
 }
 
 func TestReadHonoursCancellation(t *testing.T) {

@@ -52,6 +52,18 @@ func (n Node) Connect(ctx context.Context) (*Client, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("Sensaa node identity changed: discovered %q, connected to %q", n.id, message.ID)
 	}
+	connectedMetadata, err := capabilityMetadataFromWire(message)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("invalid Sensaa greeting: %w", err)
+	}
+	if discovered, ok := n.TargetCountCapability(); ok {
+		connected, connectedOK := connectedMetadata[CapabilityTargetCount].(TargetCountCapability)
+		if connectedOK && connected.Max != discovered.Max {
+			_ = conn.Close()
+			return nil, fmt.Errorf("Sensaa target-count maximum changed: discovered %d, connected with %d", discovered.Max, connected.Max)
+		}
+	}
 	return client, nil
 }
 

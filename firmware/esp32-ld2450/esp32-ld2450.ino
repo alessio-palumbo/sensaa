@@ -132,7 +132,10 @@ void sendHello(NetworkClient &client) {
     printJSONString(client, nodeID);
     client.print(",\"name\":");
     printJSONString(client, SENSAA_NODE_NAME);
-    client.println(",\"capabilities\":[\"presence\",\"target_count\",\"target_position\",\"target_resolution\",\"target_velocity\"]}");
+    client.print(",\"capabilities\":[\"presence\",\"target_count\",\"target_position\",\"target_resolution\",\"target_velocity\"]");
+    client.print(",\"capability_metadata\":{\"target_count\":{\"max\":");
+    client.print(TARGET_COUNT);
+    client.println("}}}");
 }
 
 void publishFrame(const Target *targets, size_t count) {
@@ -259,6 +262,9 @@ void startNetworkServices() {
     MDNS.addServiceTxt("sensaa", "tcp", "id", static_cast<const char *>(nodeID));
     MDNS.addServiceTxt("sensaa", "tcp", "name", SENSAA_NODE_NAME);
     MDNS.addServiceTxt("sensaa", "tcp", "caps", "presence,target_count,target_position,target_resolution,target_velocity");
+    char targetCountMax[12];
+    snprintf(targetCountMax, sizeof(targetCountMax), "%u", static_cast<unsigned int>(TARGET_COUNT));
+    MDNS.addServiceTxt("sensaa", "tcp", "target_count_max", static_cast<const char *>(targetCountMax));
 
     networkServicesRunning = true;
     Serial.print("Sensaa node ");
