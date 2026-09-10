@@ -15,8 +15,9 @@ constexpr int RADAR_TX = 3; // connected to LD2450 RX
 
 constexpr uint16_t SENSAA_PORT = 8765;
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000;
+constexpr unsigned long NETWORK_TELEMETRY_INTERVAL_MS = 5000;
 constexpr unsigned long NETWORK_DIAGNOSTIC_INTERVAL_MS = 30000;
-constexpr size_t UPDATE_MESSAGE_SIZE = 512;
+constexpr size_t UPDATE_MESSAGE_SIZE = 768;
 
 constexpr uint8_t FRAME_HEADER[] = {0xAA, 0xFF, 0x03, 0x00};
 constexpr uint8_t FRAME_FOOTER[] = {0x55, 0xCC};
@@ -42,8 +43,11 @@ NetworkServer sensaaServer(SENSAA_PORT, 1);
 NetworkClient sensaaClient;
 bool networkServicesRunning = false;
 unsigned long lastWiFiAttempt = 0;
+unsigned long lastNetworkTelemetrySample = 0;
 unsigned long lastNetworkDiagnostic = 0;
 uint32_t wifiConnectionCount = 0;
+long wifiRSSIDBm = 0;
+int32_t wifiChannel = 0;
 char nodeID[32];
 char hostname[32];
 
@@ -194,7 +198,14 @@ void publishFrame(const Target *targets, size_t count) {
             targets[i].resolution);
         first = false;
     }
-    complete = complete && appendFormat(message, sizeof(message), length, "]}\n");
+    complete = complete && appendFormat(
+        message,
+        sizeof(message),
+        length,
+        "],\"network\":{\"transport\":\"wifi\",\"rssi_dbm\":%ld,\"channel\":%ld,\"reconnect_count\":%lu}}\n",
+        wifiRSSIDBm,
+        static_cast<long>(wifiChannel),
+        static_cast<unsigned long>(wifiConnectionCount > 0 ? wifiConnectionCount - 1 : 0));
     if (!complete) {
         Serial.println("Sensaa update exceeded its message buffer");
         return;
@@ -304,6 +315,9 @@ void startNetworkServices() {
 
     networkServicesRunning = true;
     ++wifiConnectionCount;
+    wifiRSSIDBm = WiFi.RSSI();
+    wifiChannel = WiFi.channel();
+    lastNetworkTelemetrySample = millis();
     lastNetworkDiagnostic = millis();
     Serial.print("Sensaa node ");
     Serial.print(nodeID);
@@ -312,9 +326,19 @@ void startNetworkServices() {
     Serial.print(':');
     Serial.print(SENSAA_PORT);
     Serial.print(" RSSI=");
-    Serial.print(WiFi.RSSI());
+    Serial.print(wifiRSSIDBm);
     Serial.print("dBm channel=");
-    Serial.println(WiFi.channel());
+    Serial.println(wifiChannel);
+}
+
+void sampleNetworkTelemetry() {
+    const unsigned long now = millis();
+    if (!networkServicesRunning || now - lastNetworkTelemetrySample < NETWORK_TELEMETRY_INTERVAL_MS) {
+        return;
+    }
+    lastNetworkTelemetrySample = now;
+    wifiRSSIDBm = WiFi.RSSI();
+    wifiChannel = WiFi.channel();
 }
 
 void printNetworkDiagnostic() {
@@ -324,9 +348,9 @@ void printNetworkDiagnostic() {
     }
     lastNetworkDiagnostic = now;
     Serial.print("Sensaa network RSSI=");
-    Serial.print(WiFi.RSSI());
+    Serial.print(wifiRSSIDBm);
     Serial.print("dBm channel=");
-    Serial.print(WiFi.channel());
+    Serial.print(wifiChannel);
     Serial.print(" reconnects=");
     Serial.print(wifiConnectionCount > 0 ? wifiConnectionCount - 1 : 0);
     Serial.print(" client=");
@@ -355,6 +379,8 @@ void maintainNetwork() {
     if (!networkServicesRunning) {
         return;
     }
+
+    sampleNetworkTelemetry();
 
     if (!sensaaClient.connected()) {
         sensaaClient.stop();

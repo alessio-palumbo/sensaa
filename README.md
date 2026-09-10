@@ -46,6 +46,9 @@ the versioned node greeting with a five-second handshake limit. `Read` returns
 complete typed snapshots and honors context cancellation/deadlines.
 Applications can reconnect by rediscovering; the LIFX example does this
 automatically and treats five seconds without an update as a stale stream.
+Updates may also include optional `NetworkTelemetry`, such as a Wi-Fi RSSI,
+channel, and reconnect count. Network metrics describe transport health rather
+than sensor capabilities, and consumers must tolerate nodes that omit them.
 
 ## Firmware setup
 
@@ -138,8 +141,9 @@ capability-scoped metadata such as `target_count_max`. After a TCP connection
 the node sends one `hello` JSON line—including the same capability metadata—
 followed by `update` lines. Each update is a complete snapshot containing
 presence, target count, and zero or more targets with millimetre positions,
-cm/s velocity, and millimetre resolution. Protocol JSON is intentionally
-private to the Go package; callers consume typed values.
+cm/s velocity, and millimetre resolution. An update can additionally carry an
+optional `network` object with point-in-time link telemetry. Protocol JSON is
+intentionally private to the Go package; callers consume typed values.
 
 The metadata returned by `Node` is the discovery snapshot. On connection,
 metadata present in both discovery and the greeting must agree. A greeting

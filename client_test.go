@@ -13,7 +13,7 @@ import (
 func TestConnectAndRead(t *testing.T) {
 	node, stop := serveTestStream(t,
 		`{"type":"hello","version":1,"id":"node-1","name":"Test","capabilities":["presence","target_count"],"capability_metadata":{"target_count":{"max":3}}}`+"\n"+
-			`{"type":"update","sequence":7,"uptime_ms":1250,"presence":true,"target_count":1,"targets":[{"x_mm":-300,"y_mm":400,"velocity_cm_s":-8,"resolution_mm":360}]}`+"\n",
+			`{"type":"update","sequence":7,"uptime_ms":1250,"presence":true,"target_count":1,"targets":[{"x_mm":-300,"y_mm":400,"velocity_cm_s":-8,"resolution_mm":360}],"network":{"transport":"wifi","rssi_dbm":-58,"channel":6,"reconnect_count":1}}`+"\n",
 	)
 	defer stop()
 	node.capabilities = []Capability{CapabilityPresence, CapabilityTargetCount}
@@ -40,6 +40,9 @@ func TestConnectAndRead(t *testing.T) {
 	want := Target{PositionMM: PositionMM{X: -300, Y: 400}, VelocityCMS: -8, ResolutionMM: 360}
 	if update.Targets[0] != want {
 		t.Fatalf("target = %+v, want %+v", update.Targets[0], want)
+	}
+	if update.Network == nil || update.Network.Transport != NetworkTransportWiFi || update.Network.RSSIDBm == nil || *update.Network.RSSIDBm != -58 {
+		t.Fatalf("network telemetry = %+v, want Wi-Fi RSSI -58 dBm", update.Network)
 	}
 }
 

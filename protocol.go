@@ -22,6 +22,7 @@ type wireMessage struct {
 	Presence           bool                           `json:"presence"`
 	TargetCount        int                            `json:"target_count,omitempty"`
 	Targets            []wireTarget                   `json:"targets,omitempty"`
+	Network            *wireNetworkTelemetry          `json:"network,omitempty"`
 }
 
 type wireTarget struct {
@@ -29,6 +30,13 @@ type wireTarget struct {
 	YMM          int16  `json:"y_mm"`
 	VelocityCMS  int16  `json:"velocity_cm_s"`
 	ResolutionMM uint16 `json:"resolution_mm"`
+}
+
+type wireNetworkTelemetry struct {
+	Transport      NetworkTransport `json:"transport"`
+	RSSIDBm        *int             `json:"rssi_dbm,omitempty"`
+	Channel        *int             `json:"channel,omitempty"`
+	ReconnectCount *uint32          `json:"reconnect_count,omitempty"`
 }
 
 func decodeWireMessage(line []byte) (wireMessage, error) {
@@ -81,11 +89,31 @@ func updateFromWire(message wireMessage) (Update, error) {
 			ResolutionMM: target.ResolutionMM,
 		}
 	}
+	network, err := networkTelemetryFromWire(message.Network)
+	if err != nil {
+		return Update{}, err
+	}
 	return Update{
 		Sequence: message.Sequence,
 		Uptime:   time.Duration(message.UptimeMS) * time.Millisecond,
 		Presence: message.Presence,
 		Targets:  targets,
+		Network:  network,
+	}, nil
+}
+
+func networkTelemetryFromWire(wire *wireNetworkTelemetry) (*NetworkTelemetry, error) {
+	if wire == nil {
+		return nil, nil
+	}
+	if wire.Transport == "" {
+		return nil, fmt.Errorf("network telemetry is missing its transport")
+	}
+	return &NetworkTelemetry{
+		Transport:      wire.Transport,
+		RSSIDBm:        wire.RSSIDBm,
+		Channel:        wire.Channel,
+		ReconnectCount: wire.ReconnectCount,
 	}, nil
 }
 

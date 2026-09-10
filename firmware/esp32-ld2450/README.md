@@ -27,6 +27,8 @@ USB serial at 115200 baud remains available for diagnostics. Normal sensor
 streaming uses Wi-Fi, mDNS/DNS-SD service `_sensaa._tcp.local`, and TCP port
 8765; USB does not need to remain connected after flashing. The firmware
 disables Wi-Fi modem sleep to favour predictable LAN latency over power use,
-which is appropriate for this USB-powered node. Every 30 seconds, serial also
-reports RSSI, channel, reconnect count, client state, and stream sequence to
-help distinguish radio problems from application latency.
+which is appropriate for this USB-powered node. RSSI and channel are sampled
+every five seconds and included, with the reconnect count, as optional network
+telemetry in every sensor update. Every 30 seconds, serial also reports those
+metrics, client state, and stream sequence to help distinguish radio problems
+from application latency.

@@ -78,12 +78,29 @@ type Target struct {
 	ResolutionMM uint16
 }
 
+// NetworkTransport identifies the link used by a node to publish updates.
+// Unknown future values are preserved for forward compatibility.
+type NetworkTransport string
+
+const NetworkTransportWiFi NetworkTransport = "wifi"
+
+// NetworkTelemetry contains optional, point-in-time information about a
+// node's network link. Metric pointers are nil when the node cannot report
+// that value. ReconnectCount counts reconnections since the node booted.
+type NetworkTelemetry struct {
+	Transport      NetworkTransport
+	RSSIDBm        *int
+	Channel        *int
+	ReconnectCount *uint32
+}
+
 // Update is a complete snapshot of the current sensor state.
 type Update struct {
 	Sequence uint64
 	Uptime   time.Duration
 	Presence bool
 	Targets  []Target
+	Network  *NetworkTelemetry
 }
 
 func (u Update) TargetCount() int { return len(u.Targets) }
