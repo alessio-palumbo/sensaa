@@ -3,6 +3,7 @@
 #include <NetworkClient.h>
 #include <NetworkServer.h>
 #include <WiFi.h>
+#include <cstdarg>
 #include <cstring>
 
 #include "config.h"
@@ -14,6 +15,8 @@ constexpr int RADAR_TX = 3; // connected to LD2450 RX
 
 constexpr uint16_t SENSAA_PORT = 8765;
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000;
+constexpr unsigned long NETWORK_DIAGNOSTIC_INTERVAL_MS = 30000;
+constexpr size_t UPDATE_MESSAGE_SIZE = 512;
 
 constexpr uint8_t FRAME_HEADER[] = {0xAA, 0xFF, 0x03, 0x00};
 constexpr uint8_t FRAME_FOOTER[] = {0x55, 0xCC};
@@ -39,6 +42,8 @@ NetworkServer sensaaServer(SENSAA_PORT, 1);
 NetworkClient sensaaClient;
 bool networkServicesRunning = false;
 unsigned long lastWiFiAttempt = 0;
+unsigned long lastNetworkDiagnostic = 0;
+uint32_t wifiConnectionCount = 0;
 char nodeID[32];
 char hostname[32];
 
@@ -138,38 +143,69 @@ void sendHello(NetworkClient &client) {
     client.println("}}}");
 }
 
+bool appendFormat(char *buffer, size_t capacity, size_t &length, const char *format, ...) {
+    if (length >= capacity) {
+        return false;
+    }
+
+    va_list arguments;
+    va_start(arguments, format);
+    const int written = vsnprintf(buffer + length, capacity - length, format, arguments);
+    va_end(arguments);
+    if (written < 0 || static_cast<size_t>(written) >= capacity - length) {
+        return false;
+    }
+    length += static_cast<size_t>(written);
+    return true;
+}
+
 void publishFrame(const Target *targets, size_t count) {
     if (!sensaaClient || !sensaaClient.connected()) {
         return;
     }
 
-    sensaaClient.print("{\"type\":\"update\",\"sequence\":");
-    sensaaClient.print(++sequenceNumber);
-    sensaaClient.print(",\"uptime_ms\":");
-    sensaaClient.print(millis());
-    sensaaClient.print(",\"presence\":");
-    sensaaClient.print(count > 0 ? "true" : "false");
-    sensaaClient.print(",\"target_count\":");
-    sensaaClient.print(count);
-    sensaaClient.print(",\"targets\":[");
+    char message[UPDATE_MESSAGE_SIZE];
+    size_t length = 0;
+    const uint64_t sequence = ++sequenceNumber;
+    bool complete = appendFormat(
+        message,
+        sizeof(message),
+        length,
+        "{\"type\":\"update\",\"sequence\":%llu,\"uptime_ms\":%lu,\"presence\":%s,\"target_count\":%u,\"targets\":[",
+        static_cast<unsigned long long>(sequence),
+        millis(),
+        count > 0 ? "true" : "false",
+        static_cast<unsigned int>(count));
 
     bool first = true;
-    for (size_t i = 0; i < TARGET_COUNT; ++i) {
+    for (size_t i = 0; complete && i < TARGET_COUNT; ++i) {
         if (!targets[i].valid) {
             continue;
         }
-        if (!first) {
-            sensaaClient.print(',');
-        }
-        first = false;
-        sensaaClient.printf(
-            "{\"x_mm\":%d,\"y_mm\":%d,\"velocity_cm_s\":%d,\"resolution_mm\":%u}",
+        complete = appendFormat(
+            message,
+            sizeof(message),
+            length,
+            "%s{\"x_mm\":%d,\"y_mm\":%d,\"velocity_cm_s\":%d,\"resolution_mm\":%u}",
+            first ? "" : ",",
             targets[i].x,
             targets[i].y,
             targets[i].speed,
             targets[i].resolution);
+        first = false;
     }
-    sensaaClient.println("]}");
+    complete = complete && appendFormat(message, sizeof(message), length, "]}\n");
+    if (!complete) {
+        Serial.println("Sensaa update exceeded its message buffer");
+        return;
+    }
+
+    // A complete snapshot is deliberately submitted in one call. This avoids
+    // turning the many JSON fields into small TCP writes when TCP_NODELAY is on.
+    if (sensaaClient.write(reinterpret_cast<const uint8_t *>(message), length) != length) {
+        Serial.println("Sensaa client write failed; closing stream");
+        sensaaClient.stop();
+    }
 }
 
 void handleFrame(const uint8_t *data) {
@@ -267,12 +303,36 @@ void startNetworkServices() {
     MDNS.addServiceTxt("sensaa", "tcp", "target_count_max", static_cast<const char *>(targetCountMax));
 
     networkServicesRunning = true;
+    ++wifiConnectionCount;
+    lastNetworkDiagnostic = millis();
     Serial.print("Sensaa node ");
     Serial.print(nodeID);
     Serial.print(" listening at ");
     Serial.print(WiFi.localIP());
     Serial.print(':');
-    Serial.println(SENSAA_PORT);
+    Serial.print(SENSAA_PORT);
+    Serial.print(" RSSI=");
+    Serial.print(WiFi.RSSI());
+    Serial.print("dBm channel=");
+    Serial.println(WiFi.channel());
+}
+
+void printNetworkDiagnostic() {
+    const unsigned long now = millis();
+    if (!networkServicesRunning || now - lastNetworkDiagnostic < NETWORK_DIAGNOSTIC_INTERVAL_MS) {
+        return;
+    }
+    lastNetworkDiagnostic = now;
+    Serial.print("Sensaa network RSSI=");
+    Serial.print(WiFi.RSSI());
+    Serial.print("dBm channel=");
+    Serial.print(WiFi.channel());
+    Serial.print(" reconnects=");
+    Serial.print(wifiConnectionCount > 0 ? wifiConnectionCount - 1 : 0);
+    Serial.print(" client=");
+    Serial.print(sensaaClient && sensaaClient.connected() ? "connected" : "none");
+    Serial.print(" sequence=");
+    Serial.printf("%llu\n", static_cast<unsigned long long>(sequenceNumber));
 }
 
 void maintainNetwork() {
@@ -307,6 +367,7 @@ void maintainNetwork() {
             Serial.println(sensaaClient.remoteIP());
         }
     }
+    printNetworkDiagnostic();
 }
 
 void setup() {
@@ -324,6 +385,9 @@ void setup() {
     snprintf(hostname, sizeof(hostname), "sensaa-%06lx", static_cast<unsigned long>(mac & 0xFFFFFF));
 
     WiFi.mode(WIFI_STA);
+    if (!WiFi.setSleep(false)) {
+        Serial.println("Could not disable Wi-Fi modem sleep");
+    }
     WiFi.setHostname(hostname);
     // Make the first retry eligible immediately without blocking radar input.
     lastWiFiAttempt = millis() - WIFI_RETRY_INTERVAL_MS;
